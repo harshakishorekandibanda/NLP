@@ -1,43 +1,110 @@
 import streamlit as st
 import pandas as pd
-import nltk
 import string
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
+import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 
-nltk.download('stopwords')
-nltk.download('wordnet')
+# --------------------------------
+# PAGE CONFIG
+# --------------------------------
+st.set_page_config(
+    page_title="Fake News Detector",
+    page_icon="📰",
+    layout="centered"
+)
 
-# Load dataset
-data = pd.read_csv("fake_news.csv")
+# --------------------------------
+# TITLE SECTION
+# --------------------------------
+st.markdown("<h1 style='text-align: center; color: #4B8BBE;'>📰 Fake News Detection System</h1>", unsafe_allow_html=True)
 
-lemmatizer = WordNetLemmatizer()
-stop_words = set(stopwords.words('english'))
+st.markdown(
+    "<p style='text-align: center;'>Detect whether a news headline is <b>Real</b> or <b>Fake</b> using NLP (TF-IDF + Logistic Regression)</p>",
+    unsafe_allow_html=True
+)
 
-def preprocess(text):
+st.divider()
+
+# --------------------------------
+# LOAD DATA
+# --------------------------------
+@st.cache_data
+def load_data():
+    df = pd.read_csv("fake_news.csv")
+    df = df.dropna()
+    return df
+
+df = load_data()
+
+# --------------------------------
+# TEXT CLEANING
+# --------------------------------
+def clean_text(text):
     text = text.lower()
+    text = re.sub(r'\d+', '', text)
     text = text.translate(str.maketrans('', '', string.punctuation))
-    words = text.split()
-    words = [lemmatizer.lemmatize(w) for w in words if w not in stop_words]
-    return " ".join(words)
+    return text
 
-data["clean_text"] = data["text"].apply(preprocess)
+df["text"] = df["text"].apply(clean_text)
 
-vectorizer = TfidfVectorizer()
-X = vectorizer.fit_transform(data["clean_text"])
-y = data["label"]
+# --------------------------------
+# TRAIN MODEL
+# --------------------------------
+@st.cache_resource
+def train_model():
+    X = df["text"]
+    y = df["label"]
 
-model = LogisticRegression()
-model.fit(X, y)
+    vectorizer = TfidfVectorizer(stop_words="english")
+    X_vectorized = vectorizer.fit_transform(X)
 
-st.title("Fake News Detection App")
+    model = LogisticRegression()
+    model.fit(X_vectorized, y)
 
-user_input = st.text_area("Enter News Text")
+    return model, vectorizer
 
-if st.button("Predict"):
-    clean_input = preprocess(user_input)
-    vector_input = vectorizer.transform([clean_input])
-    prediction = model.predict(vector_input)
-    st.success(f"Prediction: {prediction[0]}")
+model, vectorizer = train_model()
+
+# --------------------------------
+# USER INPUT
+# --------------------------------
+st.subheader("🔍 Enter News Headline")
+
+user_input = st.text_area("", height=120, placeholder="Type or paste news headline here...")
+
+if st.button("Analyze News"):
+    if user_input.strip() == "":
+        st.warning("⚠ Please enter some news text.")
+    else:
+        cleaned = clean_text(user_input)
+        vectorized_input = vectorizer.transform([cleaned])
+
+        prediction = model.predict(vectorized_input)[0]
+        probabilities = model.predict_proba(vectorized_input)[0]
+        confidence = max(probabilities) * 100
+
+        st.divider()
+
+        if prediction == "fake":
+            st.markdown(
+                "<h2 style='color: red;'>❌ This appears to be FAKE news</h2>",
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                "<h2 style='color: green;'>✅ This appears to be REAL news</h2>",
+                unsafe_allow_html=True
+            )
+
+        st.progress(int(confidence))
+        st.write(f"Confidence Score: {confidence:.2f}%")
+
+# --------------------------------
+# FOOTER
+# --------------------------------
+st.divider()
+st.markdown(
+    "<small>Model: TF-IDF + Logistic Regression | Dataset: 100 samples | Developed for NLP Practical</small>",
+    unsafe_allow_html=True
+)
